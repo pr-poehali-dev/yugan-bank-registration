@@ -1,43 +1,202 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
 import Icon from '@/components/ui/icon';
+import { useToast } from '@/hooks/use-toast';
 
 type Screen = 'login' | 'main' | 'card-type' | 'payment-system' | 'card-variant';
-type CardType = 'plastic' | 'virtual' | null;
-type PaymentSystem = 'mastercard' | 'visa' | 'mir' | null;
-type CardVariant = 'debit' | 'credit' | 'child' | 'youth' | 'super-credit' | null;
+type CardType = 'plastic' | 'virtual';
+type PaymentSystem = 'mastercard' | 'visa' | 'mir';
+type CardVariant = 'debit' | 'credit' | 'child' | 'youth' | 'super-credit';
+
+interface BankCard {
+  id: string;
+  type: CardType;
+  paymentSystem: PaymentSystem;
+  variant: CardVariant;
+  number: string;
+}
+
+interface Transaction {
+  id: string;
+  name: string;
+  amount: number;
+  icon: string;
+  color: string;
+  date: string;
+}
+
+interface FamilyMember {
+  phone: string;
+  name: string;
+}
+
+interface UserData {
+  phone: string;
+  name: string;
+  balance: number;
+  cards: BankCard[];
+  transactions: Transaction[];
+  familyCode?: string;
+  familyMembers: FamilyMember[];
+}
 
 const Index = () => {
+  const { toast } = useToast();
   const [screen, setScreen] = useState<Screen>('login');
   const [phone, setPhone] = useState('');
   const [name, setName] = useState('');
   const [activeTab, setActiveTab] = useState('main');
-  const [cardType, setCardType] = useState<CardType>(null);
-  const [paymentSystem, setPaymentSystem] = useState<PaymentSystem>(null);
-  const [cardVariant, setCardVariant] = useState<CardVariant>(null);
+  const [currentUser, setCurrentUser] = useState<UserData | null>(null);
+  
+  const [tempCardType, setTempCardType] = useState<CardType | null>(null);
+  const [tempPaymentSystem, setTempPaymentSystem] = useState<PaymentSystem | null>(null);
+
+  const [familyAction, setFamilyAction] = useState<'view' | 'create' | 'join'>('view');
+  const [joinCode, setJoinCode] = useState('');
+
+  useEffect(() => {
+    if (currentUser) {
+      localStorage.setItem(`user_${currentUser.phone}`, JSON.stringify(currentUser));
+    }
+  }, [currentUser]);
 
   const handleLogin = () => {
     if (phone && name) {
+      const savedData = localStorage.getItem(`user_${phone}`);
+      
+      if (savedData) {
+        const userData = JSON.parse(savedData);
+        setCurrentUser(userData);
+        setName(userData.name);
+      } else {
+        const newUser: UserData = {
+          phone,
+          name,
+          balance: 0,
+          cards: [],
+          transactions: [],
+          familyMembers: []
+        };
+        setCurrentUser(newUser);
+        localStorage.setItem(`user_${phone}`, JSON.stringify(newUser));
+      }
+      
       setScreen('main');
     }
   };
 
+  const handleLogout = () => {
+    setCurrentUser(null);
+    setPhone('');
+    setName('');
+    setScreen('login');
+    setActiveTab('main');
+  };
+
   const handleCardTypeSelect = (type: CardType) => {
-    setCardType(type);
+    setTempCardType(type);
     setScreen('payment-system');
   };
 
   const handlePaymentSystemSelect = (system: PaymentSystem) => {
-    setPaymentSystem(system);
+    setTempPaymentSystem(system);
     setScreen('card-variant');
   };
 
   const handleCardVariantSelect = (variant: CardVariant) => {
-    setCardVariant(variant);
+    if (!currentUser || !tempCardType || !tempPaymentSystem) return;
+
+    const newCard: BankCard = {
+      id: Date.now().toString(),
+      type: tempCardType,
+      paymentSystem: tempPaymentSystem,
+      variant: variant,
+      number: `•••• •••• •••• ${Math.floor(1000 + Math.random() * 9000)}`
+    };
+
+    setCurrentUser({
+      ...currentUser,
+      cards: [...currentUser.cards, newCard]
+    });
+
+    setTempCardType(null);
+    setTempPaymentSystem(null);
     setScreen('main');
     setActiveTab('cards');
+    
+    toast({
+      title: "Карта оформлена!",
+      description: "Ваша новая карта готова к использованию"
+    });
+  };
+
+  const generateFamilyCode = () => {
+    if (!currentUser) return;
+    
+    const code = Math.random().toString(36).substring(2, 8).toUpperCase();
+    setCurrentUser({
+      ...currentUser,
+      familyCode: code
+    });
+    
+    toast({
+      title: "Код семьи создан!",
+      description: `Поделитесь кодом: ${code}`
+    });
+  };
+
+  const handleJoinFamily = () => {
+    if (!currentUser || !joinCode) return;
+
+    const allUsers = Object.keys(localStorage)
+      .filter(key => key.startsWith('user_'))
+      .map(key => JSON.parse(localStorage.getItem(key) || '{}'));
+
+    const familyOwner = allUsers.find((user: UserData) => user.familyCode === joinCode.toUpperCase());
+
+    if (familyOwner) {
+      const updatedOwner = {
+        ...familyOwner,
+        familyMembers: [
+          ...familyOwner.familyMembers,
+          { phone: currentUser.phone, name: currentUser.name }
+        ]
+      };
+      localStorage.setItem(`user_${familyOwner.phone}`, JSON.stringify(updatedOwner));
+
+      setCurrentUser({
+        ...currentUser,
+        familyCode: joinCode.toUpperCase()
+      });
+
+      setJoinCode('');
+      setFamilyAction('view');
+      
+      toast({
+        title: "Вы вступили в семью!",
+        description: `Теперь вы часть семьи ${familyOwner.name}`
+      });
+    } else {
+      toast({
+        title: "Ошибка",
+        description: "Неверный код семьи",
+        variant: "destructive"
+      });
+    }
+  };
+
+  const getFamilyData = () => {
+    if (!currentUser?.familyCode) return [];
+
+    const allUsers = Object.keys(localStorage)
+      .filter(key => key.startsWith('user_'))
+      .map(key => JSON.parse(localStorage.getItem(key) || '{}'));
+
+    return allUsers.filter((user: UserData) => 
+      user.familyCode === currentUser.familyCode || user.phone === currentUser.phone
+    );
   };
 
   if (screen === 'login') {
@@ -260,6 +419,8 @@ const Index = () => {
     );
   }
 
+  if (!currentUser) return null;
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-background to-primary/20">
       <div className="max-w-6xl mx-auto p-4 pb-24">
@@ -268,11 +429,16 @@ const Index = () => {
             <h1 className="text-3xl font-bold bg-gradient-to-r from-primary via-secondary to-accent bg-clip-text text-transparent">
               Юган Банк
             </h1>
-            <p className="text-muted-foreground mt-1">Добро пожаловать, {name}</p>
+            <p className="text-muted-foreground mt-1">Добро пожаловать, {currentUser.name}</p>
           </div>
-          <Button variant="ghost" size="icon" className="rounded-full">
-            <Icon name="Bell" size={24} />
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="ghost" size="icon" className="rounded-full">
+              <Icon name="Bell" size={24} />
+            </Button>
+            <Button variant="ghost" size="icon" className="rounded-full" onClick={handleLogout}>
+              <Icon name="LogOut" size={24} />
+            </Button>
+          </div>
         </div>
 
         {activeTab === 'main' && (
@@ -282,15 +448,15 @@ const Index = () => {
               <div className="absolute bottom-0 left-0 w-32 h-32 bg-white/10 rounded-full -ml-16 -mb-16"></div>
               <CardContent className="p-6 relative z-10">
                 <p className="text-white/80 mb-2">Общий баланс</p>
-                <h2 className="text-4xl font-bold mb-4">250 000 ₽</h2>
+                <h2 className="text-4xl font-bold mb-4">{currentUser.balance.toLocaleString()} ₽</h2>
                 <div className="flex gap-4">
                   <div>
-                    <p className="text-white/60 text-sm">Доход</p>
-                    <p className="text-lg font-semibold">+45 000 ₽</p>
+                    <p className="text-white/60 text-sm">Карт</p>
+                    <p className="text-lg font-semibold">{currentUser.cards.length}</p>
                   </div>
                   <div>
-                    <p className="text-white/60 text-sm">Расход</p>
-                    <p className="text-lg font-semibold">-18 000 ₽</p>
+                    <p className="text-white/60 text-sm">Операций</p>
+                    <p className="text-lg font-semibold">{currentUser.transactions.length}</p>
                   </div>
                 </div>
               </CardContent>
@@ -337,67 +503,94 @@ const Index = () => {
               </Card>
             </div>
 
-            <div>
-              <h3 className="text-xl font-bold mb-4">Последние операции</h3>
-              <div className="space-y-3">
-                {[
-                  { name: 'Продукты', amount: '-2 500 ₽', icon: 'ShoppingCart', color: 'from-accent to-secondary' },
-                  { name: 'Зарплата', amount: '+65 000 ₽', icon: 'Briefcase', color: 'from-primary to-secondary' },
-                  { name: 'Кафе', amount: '-850 ₽', icon: 'Coffee', color: 'from-secondary to-accent' },
-                ].map((transaction, i) => (
-                  <Card key={i} className="bg-card/50 backdrop-blur border-border/50">
-                    <CardContent className="p-4 flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className={`w-10 h-10 rounded-full bg-gradient-to-br ${transaction.color} flex items-center justify-center`}>
-                          <Icon name={transaction.icon as any} size={20} className="text-white" />
+            {currentUser.transactions.length > 0 ? (
+              <div>
+                <h3 className="text-xl font-bold mb-4">Последние операции</h3>
+                <div className="space-y-3">
+                  {currentUser.transactions.map((transaction) => (
+                    <Card key={transaction.id} className="bg-card/50 backdrop-blur border-border/50">
+                      <CardContent className="p-4 flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className={`w-10 h-10 rounded-full bg-gradient-to-br ${transaction.color} flex items-center justify-center`}>
+                            <Icon name={transaction.icon as any} size={20} className="text-white" />
+                          </div>
+                          <div>
+                            <p className="font-semibold">{transaction.name}</p>
+                            <p className="text-sm text-muted-foreground">{transaction.date}</p>
+                          </div>
                         </div>
-                        <div>
-                          <p className="font-semibold">{transaction.name}</p>
-                          <p className="text-sm text-muted-foreground">Сегодня, 14:30</p>
-                        </div>
-                      </div>
-                      <p className={`font-bold ${transaction.amount.startsWith('+') ? 'text-green-400' : 'text-foreground'}`}>
-                        {transaction.amount}
-                      </p>
-                    </CardContent>
-                  </Card>
-                ))}
+                        <p className={`font-bold ${transaction.amount > 0 ? 'text-green-400' : 'text-foreground'}`}>
+                          {transaction.amount > 0 ? '+' : ''}{transaction.amount.toLocaleString()} ₽
+                        </p>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
               </div>
-            </div>
+            ) : (
+              <Card className="bg-card/50 backdrop-blur border-border/50">
+                <CardContent className="p-8 text-center">
+                  <Icon name="Receipt" size={48} className="mx-auto mb-4 text-muted-foreground" />
+                  <p className="text-muted-foreground">Пока нет операций</p>
+                  <p className="text-sm text-muted-foreground mt-2">Оформите карту, чтобы начать</p>
+                </CardContent>
+              </Card>
+            )}
           </div>
         )}
 
         {activeTab === 'cards' && (
           <div className="space-y-6 animate-fade-in">
             <h2 className="text-2xl font-bold">Мои карты</h2>
-            <Card className="bg-gradient-to-br from-primary via-secondary to-accent text-white border-0">
-              <CardContent className="p-6">
-                <div className="flex justify-between items-start mb-8">
-                  <Icon name="Landmark" size={32} className="text-white" />
-                  <p className="text-sm font-semibold">
-                    {cardType === 'plastic' ? 'Пластиковая' : 'Виртуальная'}
-                  </p>
-                </div>
-                <p className="text-2xl font-mono mb-4">•••• •••• •••• 4829</p>
-                <div className="flex justify-between">
-                  <div>
-                    <p className="text-white/60 text-xs mb-1">Владелец</p>
-                    <p className="font-semibold">{name}</p>
-                  </div>
-                  <div>
-                    <p className="text-white/60 text-xs mb-1">Действует до</p>
-                    <p className="font-semibold">12/28</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-            <Button
-              onClick={() => setScreen('card-type')}
-              className="w-full bg-gradient-to-r from-primary via-secondary to-accent hover:opacity-90"
-            >
-              <Icon name="Plus" size={20} className="mr-2" />
-              Добавить карту
-            </Button>
+            {currentUser.cards.length > 0 ? (
+              <>
+                {currentUser.cards.map((card) => (
+                  <Card key={card.id} className="bg-gradient-to-br from-primary via-secondary to-accent text-white border-0">
+                    <CardContent className="p-6">
+                      <div className="flex justify-between items-start mb-8">
+                        <Icon name="Landmark" size={32} className="text-white" />
+                        <div className="text-right">
+                          <p className="text-sm font-semibold">{card.type === 'plastic' ? 'Пластиковая' : 'Виртуальная'}</p>
+                          <p className="text-xs text-white/60 mt-1">{card.variant}</p>
+                        </div>
+                      </div>
+                      <p className="text-2xl font-mono mb-4">{card.number}</p>
+                      <div className="flex justify-between">
+                        <div>
+                          <p className="text-white/60 text-xs mb-1">Владелец</p>
+                          <p className="font-semibold">{currentUser.name}</p>
+                        </div>
+                        <div>
+                          <p className="text-white/60 text-xs mb-1">Действует до</p>
+                          <p className="font-semibold">12/28</p>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+                <Button
+                  onClick={() => setScreen('card-type')}
+                  className="w-full bg-gradient-to-r from-primary via-secondary to-accent hover:opacity-90"
+                >
+                  <Icon name="Plus" size={20} className="mr-2" />
+                  Добавить карту
+                </Button>
+              </>
+            ) : (
+              <Card className="bg-card/50 backdrop-blur border-border/50">
+                <CardContent className="p-8 text-center">
+                  <Icon name="CreditCard" size={48} className="mx-auto mb-4 text-muted-foreground" />
+                  <p className="text-muted-foreground mb-4">У вас пока нет карт</p>
+                  <Button
+                    onClick={() => setScreen('card-type')}
+                    className="bg-gradient-to-r from-primary via-secondary to-accent hover:opacity-90"
+                  >
+                    <Icon name="Plus" size={20} className="mr-2" />
+                    Оформить первую карту
+                  </Button>
+                </CardContent>
+              </Card>
+            )}
           </div>
         )}
 
@@ -426,11 +619,157 @@ const Index = () => {
         {activeTab === 'family' && (
           <div className="space-y-6 animate-fade-in">
             <h2 className="text-2xl font-bold">Семья</h2>
-            <Card className="bg-card/50 backdrop-blur border-border/50">
-              <CardContent className="p-6">
-                <p className="text-center text-muted-foreground">Раздел в разработке</p>
-              </CardContent>
-            </Card>
+            
+            {familyAction === 'view' && (
+              <>
+                {currentUser.familyCode ? (
+                  <Card className="bg-gradient-to-br from-primary/20 to-secondary/20 backdrop-blur border-border/50">
+                    <CardContent className="p-6">
+                      <div className="flex items-center justify-between mb-4">
+                        <div>
+                          <p className="text-sm text-muted-foreground">Код семьи</p>
+                          <p className="text-3xl font-bold font-mono">{currentUser.familyCode}</p>
+                        </div>
+                        <Icon name="Users" size={48} className="text-primary" />
+                      </div>
+                      <p className="text-sm text-muted-foreground">Поделитесь этим кодом с близкими</p>
+                    </CardContent>
+                  </Card>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <Card
+                      onClick={() => setFamilyAction('create')}
+                      className="cursor-pointer hover:scale-105 transition-transform bg-card/50 backdrop-blur border-border/50"
+                    >
+                      <CardContent className="p-6 text-center">
+                        <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-gradient-to-br from-primary to-secondary flex items-center justify-center">
+                          <Icon name="UserPlus" size={32} className="text-white" />
+                        </div>
+                        <h3 className="text-xl font-bold mb-2">Создать семью</h3>
+                        <p className="text-muted-foreground">Получите код для приглашения</p>
+                      </CardContent>
+                    </Card>
+
+                    <Card
+                      onClick={() => setFamilyAction('join')}
+                      className="cursor-pointer hover:scale-105 transition-transform bg-card/50 backdrop-blur border-border/50"
+                    >
+                      <CardContent className="p-6 text-center">
+                        <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-gradient-to-br from-accent to-secondary flex items-center justify-center">
+                          <Icon name="Key" size={32} className="text-white" />
+                        </div>
+                        <h3 className="text-xl font-bold mb-2">Вступить в семью</h3>
+                        <p className="text-muted-foreground">Введите код приглашения</p>
+                      </CardContent>
+                    </Card>
+                  </div>
+                )}
+
+                {currentUser.familyCode && (
+                  <div>
+                    <h3 className="text-xl font-bold mb-4">Члены семьи</h3>
+                    <div className="space-y-3">
+                      <Card className="bg-card/50 backdrop-blur border-border/50">
+                        <CardContent className="p-4 flex items-center gap-3">
+                          <div className="w-12 h-12 rounded-full bg-gradient-to-br from-primary to-secondary flex items-center justify-center text-white text-lg font-bold">
+                            {currentUser.name.charAt(0)}
+                          </div>
+                          <div className="flex-1">
+                            <p className="font-semibold">{currentUser.name} (Вы)</p>
+                            <p className="text-sm text-muted-foreground">{currentUser.phone}</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="font-bold">{currentUser.balance.toLocaleString()} ₽</p>
+                            <p className="text-xs text-muted-foreground">{currentUser.cards.length} карт</p>
+                          </div>
+                        </CardContent>
+                      </Card>
+
+                      {getFamilyData().filter(u => u.phone !== currentUser.phone).map((member) => (
+                        <Card key={member.phone} className="bg-card/50 backdrop-blur border-border/50">
+                          <CardContent className="p-4 flex items-center gap-3">
+                            <div className="w-12 h-12 rounded-full bg-gradient-to-br from-accent to-secondary flex items-center justify-center text-white text-lg font-bold">
+                              {member.name.charAt(0)}
+                            </div>
+                            <div className="flex-1">
+                              <p className="font-semibold">{member.name}</p>
+                              <p className="text-sm text-muted-foreground">{member.phone}</p>
+                            </div>
+                            <div className="text-right">
+                              <p className="font-bold">{member.balance.toLocaleString()} ₽</p>
+                              <p className="text-xs text-muted-foreground">{member.cards.length} карт</p>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+
+            {familyAction === 'create' && (
+              <Card className="bg-card/50 backdrop-blur border-border/50">
+                <CardContent className="p-6">
+                  <Button
+                    onClick={() => setFamilyAction('view')}
+                    variant="ghost"
+                    className="mb-4"
+                  >
+                    <Icon name="ArrowLeft" size={20} className="mr-2" />
+                    Назад
+                  </Button>
+                  <div className="text-center py-8">
+                    <Icon name="Users" size={64} className="mx-auto mb-6 text-primary" />
+                    <h3 className="text-2xl font-bold mb-4">Создать семейный аккаунт</h3>
+                    <p className="text-muted-foreground mb-6">Получите уникальный код для приглашения членов семьи</p>
+                    <Button
+                      onClick={generateFamilyCode}
+                      className="bg-gradient-to-r from-primary via-secondary to-accent hover:opacity-90"
+                    >
+                      Создать код
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {familyAction === 'join' && (
+              <Card className="bg-card/50 backdrop-blur border-border/50">
+                <CardContent className="p-6">
+                  <Button
+                    onClick={() => setFamilyAction('view')}
+                    variant="ghost"
+                    className="mb-4"
+                  >
+                    <Icon name="ArrowLeft" size={20} className="mr-2" />
+                    Назад
+                  </Button>
+                  <div className="py-8">
+                    <Icon name="Key" size={64} className="mx-auto mb-6 text-accent" />
+                    <h3 className="text-2xl font-bold mb-4 text-center">Вступить в семью</h3>
+                    <p className="text-muted-foreground mb-6 text-center">Введите код приглашения от члена семьи</p>
+                    <div className="max-w-md mx-auto space-y-4">
+                      <Input
+                        type="text"
+                        placeholder="Введите код"
+                        value={joinCode}
+                        onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
+                        className="text-center text-2xl font-mono tracking-wider"
+                        maxLength={6}
+                      />
+                      <Button
+                        onClick={handleJoinFamily}
+                        className="w-full bg-gradient-to-r from-primary via-secondary to-accent hover:opacity-90"
+                        disabled={joinCode.length !== 6}
+                      >
+                        Вступить
+                      </Button>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
           </div>
         )}
 
@@ -441,14 +780,33 @@ const Index = () => {
               <CardContent className="p-6">
                 <div className="flex items-center gap-4 mb-6">
                   <div className="w-16 h-16 rounded-full bg-gradient-to-br from-primary to-secondary flex items-center justify-center text-white text-2xl font-bold">
-                    {name.charAt(0)}
+                    {currentUser.name.charAt(0)}
                   </div>
                   <div>
-                    <h3 className="text-xl font-bold">{name}</h3>
-                    <p className="text-muted-foreground">{phone}</p>
+                    <h3 className="text-xl font-bold">{currentUser.name}</h3>
+                    <p className="text-muted-foreground">{currentUser.phone}</p>
                   </div>
                 </div>
-                <Button variant="outline" className="w-full">Редактировать профиль</Button>
+                <div className="space-y-3">
+                  <div className="flex justify-between py-2 border-b border-border/50">
+                    <span className="text-muted-foreground">Баланс</span>
+                    <span className="font-semibold">{currentUser.balance.toLocaleString()} ₽</span>
+                  </div>
+                  <div className="flex justify-between py-2 border-b border-border/50">
+                    <span className="text-muted-foreground">Карт</span>
+                    <span className="font-semibold">{currentUser.cards.length}</span>
+                  </div>
+                  <div className="flex justify-between py-2 border-b border-border/50">
+                    <span className="text-muted-foreground">Операций</span>
+                    <span className="font-semibold">{currentUser.transactions.length}</span>
+                  </div>
+                  {currentUser.familyCode && (
+                    <div className="flex justify-between py-2 border-b border-border/50">
+                      <span className="text-muted-foreground">Семейный код</span>
+                      <span className="font-semibold font-mono">{currentUser.familyCode}</span>
+                    </div>
+                  )}
+                </div>
               </CardContent>
             </Card>
           </div>
