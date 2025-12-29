@@ -4,6 +4,9 @@ import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
 import Icon from '@/components/ui/icon';
 import { useToast } from '@/hooks/use-toast';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
 
 type Screen = 'login' | 'main' | 'card-type' | 'payment-system' | 'card-variant';
 type CardType = 'plastic' | 'virtual';
@@ -16,6 +19,12 @@ interface BankCard {
   paymentSystem: PaymentSystem;
   variant: CardVariant;
   number: string;
+  fullNumber: string;
+  cvv: string;
+  expiryDate: string;
+  customName?: string;
+  isBlocked: boolean;
+  limit?: number;
 }
 
 interface Transaction {
@@ -35,11 +44,13 @@ interface FamilyMember {
 interface UserData {
   phone: string;
   name: string;
+  email?: string;
   balance: number;
   cards: BankCard[];
   transactions: Transaction[];
   familyCode?: string;
   familyMembers: FamilyMember[];
+  isPremium: boolean;
 }
 
 const Index = () => {
@@ -55,6 +66,23 @@ const Index = () => {
 
   const [familyAction, setFamilyAction] = useState<'view' | 'create' | 'join'>('view');
   const [joinCode, setJoinCode] = useState('');
+
+  const [selectedCard, setSelectedCard] = useState<BankCard | null>(null);
+  const [cardMenuOpen, setCardMenuOpen] = useState(false);
+  const [editingCardName, setEditingCardName] = useState('');
+  const [cardLimit, setCardLimit] = useState('');
+
+  const [transferType, setTransferType] = useState<'own' | 'card' | 'phone' | 'bank'>('own');
+  const [transferAmount, setTransferAmount] = useState('');
+  const [transferTarget, setTransferTarget] = useState('');
+  const [transferFromCard, setTransferFromCard] = useState('');
+
+  const [editProfile, setEditProfile] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [editPhone, setEditPhone] = useState('');
+  const [editEmail, setEditEmail] = useState('');
+
+  const [showPremium, setShowPremium] = useState(false);
 
   useEffect(() => {
     if (currentUser) {
@@ -77,7 +105,8 @@ const Index = () => {
           balance: 0,
           cards: [],
           transactions: [],
-          familyMembers: []
+          familyMembers: [],
+          isPremium: false
         };
         setCurrentUser(newUser);
         localStorage.setItem(`user_${phone}`, JSON.stringify(newUser));
@@ -95,6 +124,42 @@ const Index = () => {
     setActiveTab('main');
   };
 
+  const handleDeleteAccount = () => {
+    if (currentUser && confirm('Вы уверены, что хотите удалить аккаунт? Все данные будут потеряны.')) {
+      localStorage.removeItem(`user_${currentUser.phone}`);
+      handleLogout();
+      toast({
+        title: "Аккаунт удалён",
+        description: "Ваши данные успешно удалены"
+      });
+    }
+  };
+
+  const handleSaveProfile = () => {
+    if (!currentUser) return;
+
+    const oldPhone = currentUser.phone;
+    const updatedUser = {
+      ...currentUser,
+      name: editName || currentUser.name,
+      phone: editPhone || currentUser.phone,
+      email: editEmail || currentUser.email
+    };
+
+    if (oldPhone !== updatedUser.phone) {
+      localStorage.removeItem(`user_${oldPhone}`);
+    }
+
+    setCurrentUser(updatedUser);
+    localStorage.setItem(`user_${updatedUser.phone}`, JSON.stringify(updatedUser));
+    setEditProfile(false);
+    
+    toast({
+      title: "Профиль обновлён",
+      description: "Ваши данные успешно сохранены"
+    });
+  };
+
   const handleCardTypeSelect = (type: CardType) => {
     setTempCardType(type);
     setScreen('payment-system');
@@ -108,12 +173,19 @@ const Index = () => {
   const handleCardVariantSelect = (variant: CardVariant) => {
     if (!currentUser || !tempCardType || !tempPaymentSystem) return;
 
+    const lastDigits = Math.floor(1000 + Math.random() * 9000);
+    const fullNumber = `${Math.floor(1000 + Math.random() * 9000)} ${Math.floor(1000 + Math.random() * 9000)} ${Math.floor(1000 + Math.random() * 9000)} ${lastDigits}`;
+
     const newCard: BankCard = {
       id: Date.now().toString(),
       type: tempCardType,
       paymentSystem: tempPaymentSystem,
       variant: variant,
-      number: `•••• •••• •••• ${Math.floor(1000 + Math.random() * 9000)}`
+      number: `•••• •••• •••• ${lastDigits}`,
+      fullNumber: fullNumber,
+      cvv: Math.floor(100 + Math.random() * 900).toString(),
+      expiryDate: '12/28',
+      isBlocked: false
     };
 
     setCurrentUser({
@@ -129,6 +201,160 @@ const Index = () => {
     toast({
       title: "Карта оформлена!",
       description: "Ваша новая карта готова к использованию"
+    });
+  };
+
+  const openCardMenu = (card: BankCard) => {
+    setSelectedCard(card);
+    setEditingCardName(card.customName || '');
+    setCardLimit(card.limit?.toString() || '');
+    setCardMenuOpen(true);
+  };
+
+  const handleBlockCard = () => {
+    if (!currentUser || !selectedCard) return;
+
+    const updatedCards = currentUser.cards.map(c =>
+      c.id === selectedCard.id ? { ...c, isBlocked: !c.isBlocked } : c
+    );
+
+    setCurrentUser({ ...currentUser, cards: updatedCards });
+    setSelectedCard({ ...selectedCard, isBlocked: !selectedCard.isBlocked });
+    
+    toast({
+      title: selectedCard.isBlocked ? "Карта разблокирована" : "Карта заблокирована",
+      description: selectedCard.isBlocked ? "Карта снова активна" : "Операции по карте приостановлены"
+    });
+  };
+
+  const handleDeleteCard = () => {
+    if (!currentUser || !selectedCard) return;
+
+    if (confirm('Вы уверены, что хотите удалить карту?')) {
+      const updatedCards = currentUser.cards.filter(c => c.id !== selectedCard.id);
+      setCurrentUser({ ...currentUser, cards: updatedCards });
+      setCardMenuOpen(false);
+      
+      toast({
+        title: "Карта удалена",
+        description: "Карта успешно удалена из вашего аккаунта"
+      });
+    }
+  };
+
+  const handleRenameCard = () => {
+    if (!currentUser || !selectedCard) return;
+
+    const updatedCards = currentUser.cards.map(c =>
+      c.id === selectedCard.id ? { ...c, customName: editingCardName } : c
+    );
+
+    setCurrentUser({ ...currentUser, cards: updatedCards });
+    setSelectedCard({ ...selectedCard, customName: editingCardName });
+    
+    toast({
+      title: "Название изменено",
+      description: "Карта успешно переименована"
+    });
+  };
+
+  const handleSetLimit = () => {
+    if (!currentUser || !selectedCard) return;
+
+    const limit = cardLimit ? parseInt(cardLimit) : undefined;
+    const updatedCards = currentUser.cards.map(c =>
+      c.id === selectedCard.id ? { ...c, limit } : c
+    );
+
+    setCurrentUser({ ...currentUser, cards: updatedCards });
+    setSelectedCard({ ...selectedCard, limit });
+    
+    toast({
+      title: limit ? "Лимит установлен" : "Лимит снят",
+      description: limit ? `Лимит: ${limit.toLocaleString()} ₽` : "Лимит по карте снят"
+    });
+  };
+
+  const handleTransfer = () => {
+    if (!currentUser || !transferAmount || !transferFromCard) {
+      toast({
+        title: "Ошибка",
+        description: "Заполните все поля",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    const amount = parseInt(transferAmount);
+    if (amount <= 0 || amount > currentUser.balance) {
+      toast({
+        title: "Ошибка",
+        description: "Недостаточно средств или неверная сумма",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    let transactionName = '';
+    let targetName = '';
+
+    if (transferType === 'own') {
+      transactionName = 'Перевод между счетами';
+      targetName = 'На свою карту';
+    } else if (transferType === 'card') {
+      transactionName = 'Перевод по номеру карты';
+      targetName = transferTarget;
+    } else if (transferType === 'phone') {
+      transactionName = 'Перевод по номеру телефона';
+      targetName = transferTarget;
+    } else if (transferType === 'bank') {
+      transactionName = 'Перевод в другой банк';
+      targetName = transferTarget;
+    }
+
+    const newTransaction: Transaction = {
+      id: Date.now().toString(),
+      name: transactionName,
+      amount: -amount,
+      icon: 'Send',
+      color: 'from-accent to-secondary',
+      date: new Date().toLocaleString('ru-RU', { 
+        day: 'numeric',
+        month: 'long',
+        hour: '2-digit',
+        minute: '2-digit'
+      })
+    };
+
+    setCurrentUser({
+      ...currentUser,
+      balance: currentUser.balance - amount,
+      transactions: [newTransaction, ...currentUser.transactions]
+    });
+
+    setTransferAmount('');
+    setTransferTarget('');
+    setTransferFromCard('');
+
+    toast({
+      title: "Перевод выполнен",
+      description: `${amount.toLocaleString()} ₽ → ${targetName}`
+    });
+  };
+
+  const activatePremium = () => {
+    if (!currentUser) return;
+
+    setCurrentUser({
+      ...currentUser,
+      isPremium: true
+    });
+
+    setShowPremium(false);
+
+    toast({
+      title: "🎉 Добро пожаловать в Премиум!",
+      description: "Все привилегии активированы"
     });
   };
 
@@ -432,11 +658,28 @@ const Index = () => {
             <p className="text-muted-foreground mt-1">Добро пожаловать, {currentUser.name}</p>
           </div>
           <div className="flex gap-2">
+            {currentUser.isPremium && (
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                className="rounded-full bg-gradient-to-r from-amber-500 to-yellow-500 text-white"
+                onClick={() => setShowPremium(true)}
+              >
+                <span className="font-bold">П</span>
+              </Button>
+            )}
+            {!currentUser.isPremium && (
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                className="rounded-full border border-amber-500/50"
+                onClick={() => setShowPremium(true)}
+              >
+                <span className="font-bold text-amber-500">П</span>
+              </Button>
+            )}
             <Button variant="ghost" size="icon" className="rounded-full">
               <Icon name="Bell" size={24} />
-            </Button>
-            <Button variant="ghost" size="icon" className="rounded-full" onClick={handleLogout}>
-              <Icon name="LogOut" size={24} />
             </Button>
           </div>
         </div>
@@ -475,7 +718,10 @@ const Index = () => {
                 </CardContent>
               </Card>
 
-              <Card className="cursor-pointer hover:scale-105 transition-transform bg-card/50 backdrop-blur border-border/50">
+              <Card 
+                onClick={() => setActiveTab('transfers')}
+                className="cursor-pointer hover:scale-105 transition-transform bg-card/50 backdrop-blur border-border/50"
+              >
                 <CardContent className="p-4 text-center">
                   <div className="w-12 h-12 mx-auto mb-3 rounded-full bg-gradient-to-br from-accent to-secondary flex items-center justify-center">
                     <Icon name="Send" size={24} className="text-white" />
@@ -507,7 +753,7 @@ const Index = () => {
               <div>
                 <h3 className="text-xl font-bold mb-4">Последние операции</h3>
                 <div className="space-y-3">
-                  {currentUser.transactions.map((transaction) => (
+                  {currentUser.transactions.slice(0, 5).map((transaction) => (
                     <Card key={transaction.id} className="bg-card/50 backdrop-blur border-border/50">
                       <CardContent className="p-4 flex items-center justify-between">
                         <div className="flex items-center gap-3">
@@ -545,12 +791,26 @@ const Index = () => {
             {currentUser.cards.length > 0 ? (
               <>
                 {currentUser.cards.map((card) => (
-                  <Card key={card.id} className="bg-gradient-to-br from-primary via-secondary to-accent text-white border-0">
+                  <Card 
+                    key={card.id} 
+                    onClick={() => openCardMenu(card)}
+                    className="bg-gradient-to-br from-primary via-secondary to-accent text-white border-0 cursor-pointer hover:scale-105 transition-transform relative"
+                  >
+                    {card.isBlocked && (
+                      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center rounded-lg z-10">
+                        <div className="text-center">
+                          <Icon name="Lock" size={48} className="mx-auto mb-2" />
+                          <p className="font-bold text-lg">Карта заблокирована</p>
+                        </div>
+                      </div>
+                    )}
                     <CardContent className="p-6">
                       <div className="flex justify-between items-start mb-8">
                         <Icon name="Landmark" size={32} className="text-white" />
                         <div className="text-right">
-                          <p className="text-sm font-semibold">{card.type === 'plastic' ? 'Пластиковая' : 'Виртуальная'}</p>
+                          <p className="text-sm font-semibold">
+                            {card.customName || (card.type === 'plastic' ? 'Пластиковая' : 'Виртуальная')}
+                          </p>
                           <p className="text-xs text-white/60 mt-1">{card.variant}</p>
                         </div>
                       </div>
@@ -562,9 +822,15 @@ const Index = () => {
                         </div>
                         <div>
                           <p className="text-white/60 text-xs mb-1">Действует до</p>
-                          <p className="font-semibold">12/28</p>
+                          <p className="font-semibold">{card.expiryDate}</p>
                         </div>
                       </div>
+                      {card.limit && (
+                        <div className="mt-4 pt-4 border-t border-white/20">
+                          <p className="text-white/60 text-xs">Лимит операций</p>
+                          <p className="font-semibold">{card.limit.toLocaleString()} ₽</p>
+                        </div>
+                      )}
                     </CardContent>
                   </Card>
                 ))}
@@ -597,9 +863,126 @@ const Index = () => {
         {activeTab === 'transfers' && (
           <div className="space-y-6 animate-fade-in">
             <h2 className="text-2xl font-bold">Переводы</h2>
+            
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <Button
+                variant={transferType === 'own' ? 'default' : 'outline'}
+                onClick={() => setTransferType('own')}
+                className={transferType === 'own' ? 'bg-gradient-to-r from-primary to-secondary' : ''}
+              >
+                Свои счета
+              </Button>
+              <Button
+                variant={transferType === 'card' ? 'default' : 'outline'}
+                onClick={() => setTransferType('card')}
+                className={transferType === 'card' ? 'bg-gradient-to-r from-primary to-secondary' : ''}
+              >
+                По карте
+              </Button>
+              <Button
+                variant={transferType === 'phone' ? 'default' : 'outline'}
+                onClick={() => setTransferType('phone')}
+                className={transferType === 'phone' ? 'bg-gradient-to-r from-primary to-secondary' : ''}
+              >
+                По телефону
+              </Button>
+              <Button
+                variant={transferType === 'bank' ? 'default' : 'outline'}
+                onClick={() => setTransferType('bank')}
+                className={transferType === 'bank' ? 'bg-gradient-to-r from-primary to-secondary' : ''}
+              >
+                В другой банк
+              </Button>
+            </div>
+
             <Card className="bg-card/50 backdrop-blur border-border/50">
-              <CardContent className="p-6">
-                <p className="text-center text-muted-foreground">Раздел в разработке</p>
+              <CardContent className="p-6 space-y-4">
+                <div>
+                  <Label>С какой карты</Label>
+                  <select 
+                    className="w-full mt-2 p-3 rounded-lg bg-background border border-border text-foreground"
+                    value={transferFromCard}
+                    onChange={(e) => setTransferFromCard(e.target.value)}
+                  >
+                    <option value="">Выберите карту</option>
+                    {currentUser.cards.filter(c => !c.isBlocked).map(card => (
+                      <option key={card.id} value={card.id}>
+                        {card.customName || card.number} - {card.variant}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {transferType === 'own' && (
+                  <div>
+                    <Label>На какую карту</Label>
+                    <select className="w-full mt-2 p-3 rounded-lg bg-background border border-border text-foreground">
+                      <option value="">Выберите карту</option>
+                      {currentUser.cards.filter(c => !c.isBlocked && c.id !== transferFromCard).map(card => (
+                        <option key={card.id} value={card.id}>
+                          {card.customName || card.number} - {card.variant}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {transferType === 'card' && (
+                  <div>
+                    <Label>Номер карты получателя</Label>
+                    <Input
+                      placeholder="0000 0000 0000 0000"
+                      value={transferTarget}
+                      onChange={(e) => setTransferTarget(e.target.value)}
+                      className="mt-2"
+                    />
+                  </div>
+                )}
+
+                {transferType === 'phone' && (
+                  <div>
+                    <Label>Номер телефона получателя</Label>
+                    <Input
+                      placeholder="+7 (___) ___-__-__"
+                      value={transferTarget}
+                      onChange={(e) => setTransferTarget(e.target.value)}
+                      className="mt-2"
+                    />
+                  </div>
+                )}
+
+                {transferType === 'bank' && (
+                  <div>
+                    <Label>Реквизиты получателя</Label>
+                    <Input
+                      placeholder="БИК, номер счёта"
+                      value={transferTarget}
+                      onChange={(e) => setTransferTarget(e.target.value)}
+                      className="mt-2"
+                    />
+                  </div>
+                )}
+
+                <div>
+                  <Label>Сумма перевода</Label>
+                  <Input
+                    type="number"
+                    placeholder="0"
+                    value={transferAmount}
+                    onChange={(e) => setTransferAmount(e.target.value)}
+                    className="mt-2 text-2xl font-bold"
+                  />
+                  <p className="text-sm text-muted-foreground mt-1">
+                    Доступно: {currentUser.balance.toLocaleString()} ₽
+                  </p>
+                </div>
+
+                <Button
+                  onClick={handleTransfer}
+                  className="w-full bg-gradient-to-r from-primary via-secondary to-accent hover:opacity-90 py-6 text-lg"
+                >
+                  Перевести
+                </Button>
               </CardContent>
             </Card>
           </div>
@@ -782,12 +1165,21 @@ const Index = () => {
                   <div className="w-16 h-16 rounded-full bg-gradient-to-br from-primary to-secondary flex items-center justify-center text-white text-2xl font-bold">
                     {currentUser.name.charAt(0)}
                   </div>
-                  <div>
+                  <div className="flex-1">
                     <h3 className="text-xl font-bold">{currentUser.name}</h3>
                     <p className="text-muted-foreground">{currentUser.phone}</p>
+                    {currentUser.email && (
+                      <p className="text-sm text-muted-foreground">{currentUser.email}</p>
+                    )}
                   </div>
+                  {currentUser.isPremium && (
+                    <div className="px-3 py-1 rounded-full bg-gradient-to-r from-amber-500 to-yellow-500 text-white text-sm font-bold">
+                      ПРЕМИУМ
+                    </div>
+                  )}
                 </div>
-                <div className="space-y-3">
+
+                <div className="space-y-3 mb-6">
                   <div className="flex justify-between py-2 border-b border-border/50">
                     <span className="text-muted-foreground">Баланс</span>
                     <span className="font-semibold">{currentUser.balance.toLocaleString()} ₽</span>
@@ -807,11 +1199,247 @@ const Index = () => {
                     </div>
                   )}
                 </div>
+
+                <div className="space-y-3">
+                  <Button 
+                    variant="outline" 
+                    className="w-full justify-start"
+                    onClick={() => {
+                      setEditName(currentUser.name);
+                      setEditPhone(currentUser.phone);
+                      setEditEmail(currentUser.email || '');
+                      setEditProfile(true);
+                    }}
+                  >
+                    <Icon name="Edit" size={20} className="mr-2" />
+                    Редактировать профиль
+                  </Button>
+                  
+                  <Button 
+                    variant="outline" 
+                    className="w-full justify-start"
+                    onClick={handleLogout}
+                  >
+                    <Icon name="LogOut" size={20} className="mr-2" />
+                    Выйти из аккаунта
+                  </Button>
+
+                  <Button 
+                    variant="destructive" 
+                    className="w-full justify-start"
+                    onClick={handleDeleteAccount}
+                  >
+                    <Icon name="Trash2" size={20} className="mr-2" />
+                    Удалить аккаунт
+                  </Button>
+                </div>
               </CardContent>
             </Card>
           </div>
         )}
       </div>
+
+      <Dialog open={cardMenuOpen} onOpenChange={setCardMenuOpen}>
+        <DialogContent className="bg-card max-w-md">
+          <DialogHeader>
+            <DialogTitle>Настройки карты</DialogTitle>
+          </DialogHeader>
+          {selectedCard && (
+            <div className="space-y-4">
+              <Card className="bg-gradient-to-br from-primary/20 to-secondary/20 border-0">
+                <CardContent className="p-4">
+                  <p className="text-sm text-muted-foreground mb-1">Номер карты</p>
+                  <p className="text-xl font-mono font-bold mb-3">{selectedCard.fullNumber}</p>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <p className="text-xs text-muted-foreground">Срок действия</p>
+                      <p className="font-semibold">{selectedCard.expiryDate}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">CVV</p>
+                      <p className="font-semibold">{selectedCard.cvv}</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <div className="space-y-3">
+                <div>
+                  <Label>Название карты</Label>
+                  <div className="flex gap-2 mt-2">
+                    <Input
+                      value={editingCardName}
+                      onChange={(e) => setEditingCardName(e.target.value)}
+                      placeholder="Моя карта"
+                    />
+                    <Button onClick={handleRenameCard}>
+                      <Icon name="Check" size={20} />
+                    </Button>
+                  </div>
+                </div>
+
+                <div>
+                  <Label>Лимит операций (₽)</Label>
+                  <div className="flex gap-2 mt-2">
+                    <Input
+                      type="number"
+                      value={cardLimit}
+                      onChange={(e) => setCardLimit(e.target.value)}
+                      placeholder="Без лимита"
+                    />
+                    <Button onClick={handleSetLimit}>
+                      <Icon name="Check" size={20} />
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between p-3 bg-muted rounded-lg">
+                  <div className="flex items-center gap-2">
+                    <Icon name={selectedCard.isBlocked ? "Unlock" : "Lock"} size={20} />
+                    <span className="font-medium">
+                      {selectedCard.isBlocked ? "Разблокировать карту" : "Заблокировать карту"}
+                    </span>
+                  </div>
+                  <Switch
+                    checked={selectedCard.isBlocked}
+                    onCheckedChange={handleBlockCard}
+                  />
+                </div>
+
+                <Button 
+                  variant="destructive" 
+                  className="w-full"
+                  onClick={handleDeleteCard}
+                >
+                  <Icon name="Trash2" size={20} className="mr-2" />
+                  Удалить карту
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={editProfile} onOpenChange={setEditProfile}>
+        <DialogContent className="bg-card max-w-md">
+          <DialogHeader>
+            <DialogTitle>Редактировать профиль</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label>Имя</Label>
+              <Input
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                className="mt-2"
+              />
+            </div>
+            <div>
+              <Label>Номер телефона</Label>
+              <Input
+                value={editPhone}
+                onChange={(e) => setEditPhone(e.target.value)}
+                className="mt-2"
+              />
+            </div>
+            <div>
+              <Label>Email</Label>
+              <Input
+                type="email"
+                value={editEmail}
+                onChange={(e) => setEditEmail(e.target.value)}
+                placeholder="example@mail.com"
+                className="mt-2"
+              />
+            </div>
+            <Button 
+              className="w-full bg-gradient-to-r from-primary via-secondary to-accent"
+              onClick={handleSaveProfile}
+            >
+              Сохранить
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showPremium} onOpenChange={setShowPremium}>
+        <DialogContent className="bg-card max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-center text-2xl">
+              <span className="bg-gradient-to-r from-amber-500 to-yellow-500 bg-clip-text text-transparent">
+                Юган Премиум
+              </span>
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <Card className="bg-gradient-to-br from-amber-500/20 to-yellow-500/20 border-amber-500/50">
+              <CardContent className="p-6">
+                <div className="space-y-3">
+                  <div className="flex items-start gap-3">
+                    <Icon name="Check" size={20} className="text-amber-500 mt-1" />
+                    <div>
+                      <p className="font-semibold">Повышенный кэшбэк</p>
+                      <p className="text-sm text-muted-foreground">До 10% на все покупки</p>
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-3">
+                    <Icon name="Check" size={20} className="text-amber-500 mt-1" />
+                    <div>
+                      <p className="font-semibold">Бесплатные переводы</p>
+                      <p className="text-sm text-muted-foreground">Без комиссии в любой банк</p>
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-3">
+                    <Icon name="Check" size={20} className="text-amber-500 mt-1" />
+                    <div>
+                      <p className="font-semibold">Увеличенные лимиты</p>
+                      <p className="text-sm text-muted-foreground">До 5 млн ₽ на операции</p>
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-3">
+                    <Icon name="Check" size={20} className="text-amber-500 mt-1" />
+                    <div>
+                      <p className="font-semibold">Приоритетная поддержка</p>
+                      <p className="text-sm text-muted-foreground">24/7 персональный менеджер</p>
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-3">
+                    <Icon name="Check" size={20} className="text-amber-500 mt-1" />
+                    <div>
+                      <p className="font-semibold">Доступ к инвестициям</p>
+                      <p className="text-sm text-muted-foreground">Эксклюзивные предложения</p>
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-3">
+                    <Icon name="Check" size={20} className="text-amber-500 mt-1" />
+                    <div>
+                      <p className="font-semibold">Страхование карт</p>
+                      <p className="text-sm text-muted-foreground">Защита от мошенничества</p>
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {!currentUser?.isPremium && (
+              <Button 
+                className="w-full bg-gradient-to-r from-amber-500 to-yellow-500 hover:opacity-90 text-white font-bold py-6 text-lg"
+                onClick={activatePremium}
+              >
+                Активировать Премиум
+              </Button>
+            )}
+
+            {currentUser?.isPremium && (
+              <div className="text-center py-4">
+                <Icon name="CheckCircle2" size={48} className="mx-auto mb-3 text-amber-500" />
+                <p className="font-bold text-lg">Премиум активен</p>
+                <p className="text-sm text-muted-foreground">Наслаждайтесь всеми привилегиями</p>
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <nav className="fixed bottom-0 left-0 right-0 bg-card/80 backdrop-blur-lg border-t border-border/50">
         <div className="max-w-6xl mx-auto px-4 py-3">
